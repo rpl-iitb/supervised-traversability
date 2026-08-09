@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 
 # Generated Isaac Sim experiment output
-data/
 *.csv
 
 # Isaac Sim and Omniverse local state
