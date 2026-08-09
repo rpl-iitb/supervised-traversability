@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Generated Isaac Sim experiment output
+data/
+*.csv
+
+# Isaac Sim and Omniverse local state
+.nvidia-omniverse/
+.cache/
+
+# Credentials and private configuration
+.gcloud/
+*.pem
+*.key
+credentials*.json
+.env
+
+# macOS
+.DS_Store
