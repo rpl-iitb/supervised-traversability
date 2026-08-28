@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "starter-0043",
+  "seed": 43,
+  "robot": {
+    "model": "nova_carter",
+    "start_pose": {
+      "x_m": -4.961,
+      "y_m": 0.785,
+      "yaw_rad": -0.107
+    }
+  },
+  "objects": [
+    {
+      "asset_key": "cable_hose",
+      "semantic_class": "low_profile_cable",
+      "footprint_radius_m": 0.18,
+      "height_m": 0.03,
+      "instance_id": "cable_hose_01",
+      "pose": {
+        "x_m": 2.35,
+        "y_m": 0.755,
+        "yaw_rad": 1.841
+      }
+    },
+    {
+      "asset_key": "low_debris",
+      "semantic_class": "low_profile_debris",
+      "footprint_radius_m": 0.22,
+      "height_m": 0.08,
+      "instance_id": "low_debris_02",
+      "pose": {
+        "x_m": 2.313,
+        "y_m": -0.008,
+        "yaw_rad": -3.021
+      }
+    },
+    {
+      "asset_key": "small_lip",
+      "semantic_class": "height_discontinuity",
+      "footprint_radius_m": 0.4,
+      "height_m": 0.04,
+      "instance_id": "small_lip_03",
+      "pose": {
+        "x_m": 1.205,
+        "y_m": 1.544,
+        "yaw_rad": 2.012
+      }
+    }
+  ],
+  "collection": {
+    "mode": "teleoperation",
+    "planned_sensors": [
+      "d455_rgbd_imu",
+      "lidar_2d",
+      "odometry",
+      "tf",
+      "joint_state"
+    ]
+  }
+}
