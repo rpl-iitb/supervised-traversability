@@ -74,6 +74,7 @@ def _sample_grid(images: torch.Tensor, path: Path) -> None:
 
 def train_gan(args) -> None:
     Path(args.out).mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(args.seed)
     dev = device()
     data = DataLoader(ImageFolder(args.positives, args.limit), batch_size=args.batch, shuffle=True, drop_last=True,
                       num_workers=args.workers)
@@ -111,14 +112,19 @@ def train_gan(args) -> None:
         print(f"gan epoch {epoch}/{args.epochs}: D {d_total / len(data):.3f}  G {g_total / len(data):.3f}  "
               f"({time.time() - started:.0f}s)", flush=True)
         _save(model, Path(args.out), "stage1_gan", config | {"epochs_done": epoch})
+        if epoch in args.snapshot_epochs:
+            _save(model, Path(args.out), f"stage1_gan_e{epoch:03d}", config | {"epochs_done": epoch})
 
 
 def train_invgen(args) -> None:
     Path(args.out).mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(args.seed)
     dev = device()
     data = DataLoader(ImageFolder(args.positives, args.limit), batch_size=args.batch, shuffle=True, drop_last=True,
                       num_workers=args.workers)
-    model = _load(Path(args.out), "stage1_gan").to(dev)
+    model = GONet()
+    model.load_state_dict(torch.load(args.gan_checkpoint or Path(args.out) / "stage1_gan.pt", map_location="cpu"))
+    model = model.to(dev)
     model.gen.eval(), model.dis.eval()
     for p in list(model.gen.parameters()) + list(model.dis.parameters()):
         p.requires_grad_(False)
@@ -166,6 +172,7 @@ def _accuracy(head, feats, labels) -> float:
 
 
 def train_head(args) -> None:
+    torch.manual_seed(args.seed)
     dev = device()
     model = _load(Path(args.out), args.from_stage).to(dev).eval()
     root = Path(args.annotation_root)
@@ -210,8 +217,13 @@ def main() -> None:
         p.add_argument("--lr", type=float, default=lr)
         p.add_argument("--limit", type=int, default=None, help="use only the first N images (smoke tests)")
         p.add_argument("--workers", type=int, default=0)
+        p.add_argument("--seed", type=int, default=0)
+        if name == "gan":
+            p.add_argument("--snapshot-epochs", type=lambda t: {int(v) for v in t.split(",") if v}, default=set(),
+                           help="also keep checkpoints at these epochs, e.g. 10,20,30,40")
         if name == "invgen":
             p.add_argument("--lam", type=float, default=0.1)
+            p.add_argument("--gan-checkpoint", type=Path, default=None, help="default: <out>/stage1_gan.pt")
         p.set_defaults(func=func)
     p = sub.add_parser("head")
     p.add_argument("--annotation-root", type=Path, required=True)
@@ -222,6 +234,7 @@ def main() -> None:
     p.add_argument("--batch", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--patience", type=int, default=30)
+    p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=train_head)
     args = parser.parse_args()
     args.func(args)
