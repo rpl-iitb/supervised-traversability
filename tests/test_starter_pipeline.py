@@ -79,6 +79,14 @@ class StarterPipelineTest(unittest.TestCase):
             )
         )
 
+    def test_every_warehouse_seed_produces_a_valid_scene(self):
+        # Regression: ~23% of seeds used to raise when two on-route targets
+        # were drawn too close together.
+        from scripts.starter_pipeline import create_warehouse_scenario, minimum_clearance_ok
+
+        for seed in range(200):
+            self.assertTrue(minimum_clearance_ok(create_warehouse_scenario(seed)), seed)
+
     def test_hazard_catalog_distinguishes_collision_and_visual_only_hazards(self):
         from scripts.starter_pipeline import WAREHOUSE_OBJECT_CATALOG
 

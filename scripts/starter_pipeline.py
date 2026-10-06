@@ -60,6 +60,10 @@ WAREHOUSE_OBJECT_CATALOG = {
         "height_m": 0.025,
         "spawn_mode": "procedural_collision",
         "interaction_model": "thin_collision_proxy",
+        # A flattened wrapper is a few layers of 0.05-0.1 mm film, so ~0.5 mm
+        # once the robot is on it; height_m is only the visual crumple height.
+        # Outcome labels for thin objects are sensitive to this assumption.
+        "collision_height_m": 0.0005,
     },
     "oil_spill": {
         "semantic_class": "low_friction_surface",
@@ -197,21 +201,29 @@ def create_warehouse_scenario(seed: int, origin_x_m: float = 0.0, origin_y_m: fl
         "y_m": round(origin_y_m + rng.uniform(-0.25, 0.25), 3),
         "yaw_rad": round(rng.uniform(-0.12, 0.12), 3),
     }
-    placed: list[dict] = []
     target_count = rng.randint(1, 2)
-    target_distances = sorted(rng.uniform(2.0, 5.0) for _ in range(target_count))
-    for index, distance_m in enumerate(target_distances, start=1):
-        asset_key = rng.choice(TARGET_HAZARD_KEYS)
-        candidate = _scenario_item(
-            asset_key,
-            index,
-            _route_pose(robot_pose, distance_m, rng.uniform(-0.20, 0.20)),
-            "target_hazard",
-            rng,
-        )
-        if not _is_clear(candidate, robot_pose, placed):
-            raise RuntimeError("Target hazard placement violated the clearance contract")
-        placed.append(candidate)
+    # Retry until the on-route targets are mutually clear. The first attempt
+    # consumes the random stream exactly as the original single-shot code did,
+    # so every seed that previously succeeded produces an identical scene.
+    for _ in range(MAX_PLACEMENT_ATTEMPTS):
+        placed: list[dict] = []
+        target_distances = sorted(rng.uniform(2.0, 5.0) for _ in range(target_count))
+        for index, distance_m in enumerate(target_distances, start=1):
+            asset_key = rng.choice(TARGET_HAZARD_KEYS)
+            candidate = _scenario_item(
+                asset_key,
+                index,
+                _route_pose(robot_pose, distance_m, rng.uniform(-0.20, 0.20)),
+                "target_hazard",
+                rng,
+            )
+            if not _is_clear(candidate, robot_pose, placed):
+                break
+            placed.append(candidate)
+        if len(placed) == target_count:
+            break
+    else:
+        raise RuntimeError("Could not place target hazards clear of each other")
 
     clutter_count = rng.randint(1, 3)
     for index in range(1, clutter_count + 1):

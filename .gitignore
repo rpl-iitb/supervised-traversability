@@ -18,3 +18,12 @@ credentials*.json
 
 # macOS
 .DS_Store
+
+# Generated episodes, labels and model checkpoints (regenerable)
+data/episodes/
+data/labels/
+runs/
+
+# Local logs and generated test sets
+*.log
+data/episodes_shifted/

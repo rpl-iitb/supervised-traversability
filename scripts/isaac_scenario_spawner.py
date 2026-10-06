@@ -79,6 +79,21 @@ def spawn_spec(object_item: dict) -> dict:
     return {"kind": "legacy_proxy", "has_collision": True, "proxy": proxy_spec(object_item)}
 
 
+def cable_geometry(object_item: dict, segment_count: int = 7) -> tuple[float, list[tuple[float, float]]]:
+    """Cable radius and centreline points in the object's local frame.
+
+    Shared by the Isaac spawner and the MuJoCo proxy so both simulators build
+    the same cable from the same manifest.
+    """
+    radius_m = max(0.012, object_item["height_m"] * 0.45)
+    half_length_m = object_item["footprint_radius_m"]
+    centres = []
+    for index in range(segment_count + 1):
+        progress = index / segment_count
+        centres.append((-half_length_m + 2.0 * half_length_m * progress, 0.055 * math.sin(progress * math.pi * 2.0)))
+    return radius_m, centres
+
+
 def _require_runtime():
     import omni.usd
     from pxr import Gf, UsdGeom, UsdPhysics
@@ -135,15 +150,7 @@ def _spawn_proxy(stage, object_item: dict, gf, usd_geom, usd_physics):
 def _spawn_curved_cable(stage, object_item: dict, gf, usd_geom, usd_physics):
     """Create a visible, curved cable from small collision-backed capsules."""
     root = _object_root(stage, object_item, gf, usd_geom)
-    radius_m = max(0.012, object_item["height_m"] * 0.45)
-    half_length_m = object_item["footprint_radius_m"]
-    segment_count = 7
-    centres = []
-    for index in range(segment_count + 1):
-        progress = index / segment_count
-        x_m = -half_length_m + 2.0 * half_length_m * progress
-        y_m = 0.055 * math.sin(progress * math.pi * 2.0)
-        centres.append((x_m, y_m))
+    radius_m, centres = cable_geometry(object_item)
 
     for index, (first, second) in enumerate(zip(centres, centres[1:])):
         dx_m, dy_m = second[0] - first[0], second[1] - first[1]
@@ -182,15 +189,17 @@ def _spawn_crumpled_wrapper(stage, object_item: dict, gf, usd_geom, usd_physics)
     mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1])
     mesh.CreateDisplayColorAttr([gf.Vec3f(0.90, 0.88, 0.72)])
 
+    # A rigid box as tall as the visual crumple (2.5 cm) would act like a lip.
+    collision_height_m = object_item.get("collision_height_m", 0.0005)
     collider = usd_geom.Cube.Define(stage, f"{root.GetPath()}/collision_proxy")
     collider.CreateSizeAttr().Set(1.0)
     _set_xform(
         collider,
-        (0.0, 0.0, object_item["height_m"] / 2.0),
+        (0.0, 0.0, collision_height_m / 2.0),
         (0.0, 0.0, 0.0),
         gf,
         usd_geom,
-        scale=(radius_m * 2.0, radius_m * 1.4, object_item["height_m"]),
+        scale=(radius_m * 2.0, radius_m * 1.4, collision_height_m),
     )
     usd_geom.Imageable(collider.GetPrim()).MakeInvisible()
     usd_physics.CollisionAPI.Apply(collider.GetPrim())

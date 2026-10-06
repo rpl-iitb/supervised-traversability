@@ -1,4 +1,37 @@
-# Warehouse Traversability — Isaac Sim Baseline
+# Warehouse Traversability — Simulation-to-Label-to-Model Pipeline
+
+This repository holds a BTP on learning camera-based traversability for
+low-profile warehouse robots (cables, wrappers, spills, lips).
+
+## Pipeline (end to end, as of 2026-09-29)
+
+```text
+scripts/starter_pipeline.py   seeded route-based scenario manifest
+        |                                  |
+scripts/proxy_sim.py (MuJoCo)     isaac/collect_episode.py (Isaac Sim)
+        \______ identical episode format (scripts/episode_io.py) ______/
+                               |
+scripts/frame_labels.py       per-frame labels from measured outcome
+                               |  (speed tracking, IMU vibration, contact)
+learning/train_baselines.py   camera-only baselines, held-out seeds
+learning/figures.py           figures -> results/figures/
+```
+
+Quick start (laptop, ~10 min):
+
+```bash
+python3 -m scripts.proxy_sim --seeds 0-119 --output data/episodes
+python3 -m scripts.frame_labels --episodes data/episodes --output data/labels/labels.csv
+python3 -m learning.train_baselines --labels data/labels/labels.csv --episodes data/episodes --output runs/baselines
+python3 -m learning.figures --episodes data/episodes --labels data/labels/labels.csv --runs runs/baselines --output results/figures
+python3 -m unittest discover -s tests
+```
+
+The MuJoCo proxy validates the pipeline; it is not evidence about real
+robots. Isaac Sim collection is prepared in `isaac/` but not
+yet executed. See `09_pipeline_results.md` for results and caveats.
+
+## Original Isaac Sim baseline (August 2026)
 
 This repository records the first simulation baseline for a BTP on learning traversability in warehouse environments.
 
