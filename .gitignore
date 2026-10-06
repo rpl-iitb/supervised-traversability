@@ -27,3 +27,4 @@ runs/
 # Local logs and generated test sets
 *.log
 data/episodes_shifted/
+data/gonet/
