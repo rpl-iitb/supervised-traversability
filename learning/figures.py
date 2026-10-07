@@ -105,17 +105,25 @@ def episode_timeline(episode_dir: Path, labels: list[dict], output: Path) -> Non
     plt.close(fig)
 
 
+# Typical outcome per hazard in the physics-based labels: oil is unsafe where an
+# emergency stop slides too far, a thin wrapper is usually borderline (gray).
+TYPICAL_LABEL = {"clean_floor": "1", "oil_spill": "0", "plastic_wrapper": "", "cable_hose": "0", "small_lip": "0"}
+UNUSABLE_REASONS = {"patch_not_covered", "window_contaminated_by_other_hazard", "hazard_not_visible",
+                    "beyond_route", "not_reached"}
+
+
 def frame_examples(episodes: Path, labels_path: Path, output: Path) -> None:
+    """One camera view per hazard class, with its typical automatic label."""
     with labels_path.open(newline="") as file:
         rows = list(csv.DictReader(file))
     picks = []
     for patch_class in CLASS_ORDER:
-        candidates = [r for r in rows if r["patch_class"] == patch_class and r["reason"] not in
-                      {"patch_not_covered", "window_contaminated_by_other_hazard", "hazard_not_visible"}
+        candidates = [r for r in rows if r["patch_class"] == patch_class and r["reason"] not in UNUSABLE_REASONS
+                      and r["y"] == TYPICAL_LABEL[patch_class]
                       and (r["hazard_forward_m"] == "" or 1.1 < float(r["hazard_forward_m"]) < 1.5)]
         if candidates:
             picks.append(candidates[len(candidates) // 3])
-    fig, axes = plt.subplots(1, len(picks), figsize=(3.1 * len(picks), 3.3))
+    fig, axes = plt.subplots(1, len(picks), figsize=(3.1 * len(picks), 3.0))
     for ax, row in zip(np.atleast_1d(axes), picks):
         ax.imshow(plt.imread(episodes / row["rgb_path"]))
         ax.set_xticks([]), ax.set_yticks([])
@@ -124,16 +132,12 @@ def frame_examples(episodes: Path, labels_path: Path, output: Path) -> None:
             spine.set_visible(False)
         if row["bbox"]:
             u0, v0, u1, v1 = (float(v) for v in row["bbox"].split())
-            ax.add_patch(Rectangle((u0, v0), u1 - u0, v1 - v0, fill=False, ec="#fab219", lw=1.6))
-        verdict = {"1": ("traversable", GOOD), "0": ("not traversable", CRITICAL)}.get(row["y"], ("ignored: " + row["reason"].replace("_", " "), MUTED))
-        ax.set_title(CLASS_LABEL[row["patch_class"]], fontsize=10)
-        ax.text(0.0, -0.08, verdict[0], transform=ax.transAxes, color=verdict[1], fontsize=9, va="top", fontweight="bold")
-        if row["tracking"]:
-            ax.text(0.0, -0.2, f"speed ratio {float(row['tracking']):.2f} · vib {float(row['vibration_rms']):.2f} m/s²",
-                    transform=ax.transAxes, color=INK_2, fontsize=8, va="top")
-    fig.suptitle("Robot camera view with the known hazard footprint projected (yellow box)", x=0.01, ha="left",
-                 fontsize=11, fontweight="bold", color=INK)
-    fig.tight_layout(rect=(0, 0.08, 1, 1))
+            ax.add_patch(Rectangle((u0, v0), u1 - u0, v1 - v0, fill=False, ec="#fab219", lw=2))
+        verdict = {"1": ("traversable", GOOD), "0": ("not traversable", CRITICAL)}.get(row["y"], ("gray: borderline", MUTED))
+        ax.set_title(CLASS_LABEL[row["patch_class"]], fontsize=14)
+        ax.text(0.5, -0.06, verdict[0], transform=ax.transAxes, color=verdict[1], fontsize=14, va="top",
+                ha="center", fontweight="bold")
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(output, dpi=160)
     plt.close(fig)
 

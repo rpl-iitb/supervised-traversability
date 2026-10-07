@@ -208,6 +208,10 @@ def build_mjcf(scenario: dict, appearance: dict) -> str:
     return f"""
 <mujoco model="warehouse_proxy">
   <compiler angle="radian"/>
+  <!-- Fixed scene size: MuJoCo sets the camera near-clip from the model extent,
+       and the huge (mostly buried) oil-dome sphere would otherwise push it to
+       ~1.4 m and black out the near floor in every scene containing oil. -->
+  <statistic extent="15"/>
   <option timestep="{PHYSICS_DT_S}" integrator="implicitfast" cone="elliptic"/>
   <visual>
     <global offwidth="{CAMERA['width']}" offheight="{CAMERA['height']}"/>
