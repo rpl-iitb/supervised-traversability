@@ -47,6 +47,8 @@ UNOBSERVABLE_REASONS = {
     "hazard_not_visible",
     "stalled_on_other_hazard",
     "no_command_in_window",
+    "beyond_route",   # version 2 labeller
+    "not_reached",
 }
 HAZARD_MARGIN_M = 0.45
 
