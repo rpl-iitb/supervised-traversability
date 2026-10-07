@@ -1,0 +1,97 @@
+{
+  "settings": {
+    "front_contact_m": 0.2,
+    "rear_contact_m": -0.29,
+    "drive_wheel_x_m": 0.1,
+    "strip_near_m": 0.6,
+    "strip_far_m": 1.8,
+    "strip_half_width_m": 0.275,
+    "vib_window_s": 0.1,
+    "speed_smooth_s": 0.3,
+    "abnormal_run_quantile": 0.95,
+    "merge_gap_m": 0.49,
+    "unacceptable_vib_mps2": 0.3,
+    "unacceptable_delay_ratio": 1.5,
+    "unacceptable_slip": 0.2,
+    "braking_budget_mps2": 1.0
+  },
+  "thresholds_measured_from_clean": {
+    "vib_mps2": 0.0593517869841602,
+    "speed_ratio": 0.9741519726344608,
+    "slip": 0.031547067184500496,
+    "brake_stop_m": 0.020704999999999998,
+    "clean_drives": 120,
+    "clean_brake_drives": 240
+  },
+  "frames_total": 42003,
+  "frames_on_route": 31119,
+  "label_counts_on_route": {
+    "": 4023,
+    "0": 4003,
+    "1": 23093
+  },
+  "reason_counts_on_route": {
+    "abnormal_but_acceptable": 3439,
+    "normal": 23093,
+    "not_reached": 584,
+    "unacceptable": 4003
+  },
+  "gray_fraction_on_route": 0.1293,
+  "labelled_by_class": {
+    "cable_hose": {
+      "": 54,
+      "0": 1449,
+      "1": 238
+    },
+    "clean_floor": {
+      "": 1420,
+      "0": 645,
+      "1": 22439
+    },
+    "oil_spill": {
+      "": 1054,
+      "0": 711,
+      "1": 141
+    },
+    "plastic_wrapper": {
+      "": 1012,
+      "0": 129,
+      "1": 124
+    },
+    "small_lip": {
+      "": 483,
+      "0": 1069,
+      "1": 151
+    }
+  },
+  "truth_check": {
+    "hazards_by_class": {
+      "oil_spill": {
+        "n": 47,
+        "found": 47,
+        "unacceptable": 24,
+        "median_centre_error_m": 0.051
+      },
+      "plastic_wrapper": {
+        "n": 41,
+        "found": 41,
+        "unacceptable": 6,
+        "median_centre_error_m": 0.06
+      },
+      "small_lip": {
+        "n": 34,
+        "found": 33,
+        "unacceptable": 33,
+        "median_centre_error_m": 0.119
+      },
+      "cable_hose": {
+        "n": 52,
+        "found": 51,
+        "unacceptable": 50,
+        "median_centre_error_m": 0.151
+      }
+    },
+    "false_zones_in_hazard_runs": 33,
+    "zones_in_clean_runs": 27
+  }
+}

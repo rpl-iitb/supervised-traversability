@@ -85,16 +85,21 @@ def episode_timeline(episode_dir: Path, labels: list[dict], output: Path) -> Non
     ax = axes[3]
     for row in labels:
         colour = {"1": GOOD, "0": CRITICAL}.get(row["y"], NEUTRAL)
+        if row.get("reason") == "beyond_route":
+            colour = MUTED  # excluded by design, not "unclear"
         ax.add_patch(Rectangle((float(row["t_s"]), 0), 0.1, 1, color=colour, lw=0))
     ax.set_ylim(0, 1)
     ax.set_yticks([])
     ax.grid(False)
     ax.set_xlabel("time (s)")
     ax.set_ylabel("frame label", rotation=0, ha="right", va="center")
-    for x, text, colour in ((0.0, "■ traversable", GOOD), (0.25, "■ not traversable", CRITICAL), (0.55, "■ ignored (ambiguous / unobservable)", NEUTRAL)):
+    legend = [(0.0, "■ traversable", GOOD), (0.2, "■ not traversable", CRITICAL), (0.43, "■ gray (unclear / not reached)", NEUTRAL)]
+    if any(row.get("reason") == "beyond_route" for row in labels):
+        legend.append((0.72, "■ beyond route end (not used)", MUTED))
+    for x, text, colour in legend:
         ax.text(x, -0.9, text, color=colour, transform=ax.transAxes, fontsize=9)
-    fig.text(0.01, 0.005, "Each camera frame is labelled by the speed, vibration and contact measured later, while the robot "
-             "drives over the floor patch visible in it (0.8–1.8 m ahead).", color=INK_2, fontsize=8.5)
+    fig.text(0.01, 0.005, "Each photo is labelled by what the robot later experienced on the floor it shows (0.6–1.8 m ahead): "
+             "shaking, slow-down, slip or a stall.", color=INK_2, fontsize=8.5)
     fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(output, dpi=160)
     plt.close(fig)

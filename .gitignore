@@ -28,3 +28,5 @@ runs/
 *.log
 data/episodes_shifted/
 data/gonet/
+data/episodes_v2/
+data/labels_v2/

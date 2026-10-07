@@ -24,7 +24,9 @@ import math
 from pathlib import Path
 
 
-FORMAT_VERSION = "1.0"
+FORMAT_VERSION = "1.1"
+# 1.1 adds wheel_v_mps (wheel-encoder speed, for slip). 1.0 episodes still load.
+READABLE_VERSIONS = {"1.0", "1.1"}
 
 STATE_COLUMNS = (
     "t_s",
@@ -46,6 +48,7 @@ STATE_COLUMNS = (
     "imu_gz",
     "hazard_contact_n",
     "contact_object",
+    "wheel_v_mps",
 )
 FRAME_COLUMNS = ("frame_idx", "t_s", "x_m", "y_m", "yaw_rad", "rgb_path")
 _STRING_COLUMNS = {"contact_object", "rgb_path"}
@@ -129,7 +132,8 @@ def _write_csv(path: Path, columns, rows) -> None:
 def _read_csv(path: Path) -> list[dict]:
     with path.open(newline="") as file:
         return [
-            {key: (value if key in _STRING_COLUMNS else float(value)) for key, value in row.items()}
+            {key: (value if key in _STRING_COLUMNS else (float(value) if value not in ("", None) else float("nan")))
+             for key, value in row.items()}
             for row in csv.DictReader(file)
         ]
 
@@ -148,7 +152,7 @@ def write_episode(episode_dir, *, scenario: dict, meta: dict, state_rows, frame_
 def load_episode(episode_dir) -> dict:
     episode_dir = Path(episode_dir)
     meta = json.loads((episode_dir / "meta.json").read_text())
-    if meta.get("format_version") != FORMAT_VERSION:
+    if meta.get("format_version") not in READABLE_VERSIONS:
         raise ValueError(f"Unsupported episode format {meta.get('format_version')!r} in {episode_dir}")
     frames = _read_csv(episode_dir / "frames.csv")
     for frame in frames:

@@ -39,7 +39,7 @@ import numpy as np
 
 from scripts.episode_io import camera_model, write_episode
 from scripts.isaac_scenario_spawner import cable_geometry
-from scripts.route_follower import CRUISE_SPEED_MPS, RAMP_S, Route, TerminationMonitor, route_command
+from scripts.route_follower import CRUISE_SPEED_MPS, RAMP_S, DrivingDisturbance, Route, TerminationMonitor, route_command
 from scripts.starter_pipeline import create_warehouse_scenario
 
 
@@ -62,6 +62,15 @@ CONTROL_HZ = 50
 STATE_HZ = 100
 FLOOR_FRICTION = 1.0
 OIL_FRICTION = 0.08
+OIL_DOME_PEAK_M = 0.001
+# Brake-test drives: a full emergency stop every BRAKE_SPACING_M along the
+# route (enough room to regain cruise speed between stops). Two drives with
+# offset stop positions probe the floor every 0.2 m, so the middle of every
+# oil patch (~0.7 m across) is braked on. No camera frames.
+BRAKE_FIRST_M = (0.8, 1.0)
+BRAKE_SPACING_M = 0.4
+BRAKE_RESUME_ACCEL_MPS2 = 1.0
+BRAKE_TEST_TIMEOUT_S = 120.0
 # White IMU noise at the 100 Hz output, of the order of a D455's BMI055.
 ACC_NOISE_MPS2 = 0.02
 GYRO_NOISE_RPS = 0.002
@@ -138,9 +147,15 @@ def _hazard_xml(item: dict, rng: random.Random, appearance: dict) -> str:
             off = (0.0, 0.0) if index == 0 else (rng.uniform(-0.4, 0.4) * radius, rng.uniform(-0.4, 0.4) * radius)
             geom(f'type="cylinder" size="{r:.4f} 0.0006" pos="{off[0]:.4f} {off[1]:.4f} 0.0006" material="oil" '
                  'contype="0" conaffinity="0"')
-        # Friction collider: a thick box sunk into the floor with its top
-        # 0.1 mm proud. Thin discs make wheel contacts unstable in MuJoCo.
-        geom(f'type="box" size="{0.8 * radius:.4f} {0.8 * radius:.4f} 0.01" pos="0 0 -0.0099" rgba="0 0 0 0" group="3" '
+        # Friction collider: a very shallow dome (a sphere cap) rising from
+        # 0 at its rim to OIL_DOME_PEAK_M at its centre, like a puddle. It must
+        # stand clear of the floor plane, otherwise the wheel also touches the
+        # high-grip floor and never slips (verified: a 0.1 mm-proud box gave
+        # identical braking to clean floor). A box with a raised edge would
+        # add an artificial bump; the dome adds none (vibration ~0.004 m/s^2).
+        cap_radius = 0.8 * radius
+        sphere_radius = cap_radius ** 2 / (2 * OIL_DOME_PEAK_M)
+        geom(f'type="sphere" size="{sphere_radius:.3f}" pos="0 0 {OIL_DOME_PEAK_M - sphere_radius:.6f}" rgba="0 0 0 0" group="3" '
              f'priority="1" friction="{OIL_FRICTION} 0.005 0.0001"')
     elif key == "small_lip":
         diameter = 2.0 * item["footprint_radius_m"]
@@ -266,12 +281,13 @@ def clean_variant(scenario: dict) -> dict:
 
 
 def run_episode(scenario: dict, condition: str, output_root: Path, seed: int, render: bool = True,
-                appearance_regime: str = "default") -> Path:
+                appearance_regime: str = "default", brake_test: int | None = None) -> Path:
     import mujoco
     from PIL import Image
 
     scene = clean_variant(scenario) if condition == "clean" else scenario
-    episode_id = f"{scenario['scenario_id']}-{condition}"
+    episode_id = f"{scenario['scenario_id']}-{condition}" + (f"-braketest{brake_test}" if brake_test is not None else "")
+    render = render and brake_test is None
     episode_dir = output_root / episode_id
     (episode_dir / "rgb").mkdir(parents=True, exist_ok=True)
 
@@ -286,7 +302,12 @@ def run_episode(scenario: dict, condition: str, output_root: Path, seed: int, re
     acc_adr, gyro_adr = model.sensor("acc").adr[0], model.sensor("gyro").adr[0]
 
     route = Route.from_manifest(scene)
-    monitor = TerminationMonitor(route)
+    monitor = TerminationMonitor(route, timeout_s=BRAKE_TEST_TIMEOUT_S) if brake_test is not None else TerminationMonitor(route)
+    wobble = DrivingDisturbance(seed)
+    brakes: list[dict] = []
+    phase, resume_t, still_since = "cruise", 0.0, None
+    next_brake_m = BRAKE_FIRST_M[brake_test] if brake_test is not None else math.inf
+    wheel_dofs = [model.jnt_dofadr[model.joint(name).id] for name in ("wheel_left", "wheel_right")]
 
     steps_per_control = round(1.0 / (CONTROL_HZ * PHYSICS_DT_S))
     steps_per_state = round(1.0 / (STATE_HZ * PHYSICS_DT_S))
@@ -313,6 +334,29 @@ def run_episode(scenario: dict, condition: str, output_root: Path, seed: int, re
 
         if step % steps_per_control == 0:
             cmd_v, cmd_w = route_command(route, t, float(x), float(y), yaw)
+            dv, dw = wobble.step(1.0 / CONTROL_HZ)
+            if t > RAMP_S:
+                cmd_v, cmd_w = max(0.0, cmd_v + dv), cmd_w + dw
+            if brake_test is not None:
+                progress, _ = route.progress_and_offset(float(x), float(y))
+                if phase == "cruise" and progress >= next_brake_m and progress < route.length_m:
+                    phase, still_since = "brake", None
+                    brakes.append({"start_progress_m": round(progress, 4), "start_speed_mps": round(v_fwd, 4)})
+                if phase == "brake":
+                    cmd_v, cmd_w = 0.0, 0.0
+                    if abs(v_fwd) < 0.01:
+                        still_since = t if still_since is None else still_since
+                        if t - still_since >= 0.1:
+                            brakes[-1]["stop_progress_m"] = round(progress, 4)
+                            brakes[-1]["distance_m"] = round(progress - brakes[-1]["start_progress_m"], 4)
+                            phase, resume_t = "resume", t
+                            next_brake_m = brakes[-1]["start_progress_m"] + BRAKE_SPACING_M
+                    else:
+                        still_since = None
+                elif phase == "resume":
+                    cmd_v = min(cmd_v, BRAKE_RESUME_ACCEL_MPS2 * (t - resume_t))
+                    if cmd_v >= CRUISE_SPEED_MPS - 0.05:
+                        phase = "cruise"
             left = (cmd_v - cmd_w * WHEEL_HALF_TRACK_M) / WHEEL_RADIUS_M
             right = (cmd_v + cmd_w * WHEEL_HALF_TRACK_M) / WHEEL_RADIUS_M
             data.ctrl[model.actuator("left").id] = left
@@ -346,6 +390,7 @@ def run_episode(scenario: dict, condition: str, output_root: Path, seed: int, re
                 "imu_ax": round(float(acc[0]), 4), "imu_ay": round(float(acc[1]), 4), "imu_az": round(float(acc[2]), 4),
                 "imu_gx": round(float(gyro[0]), 5), "imu_gy": round(float(gyro[1]), 5), "imu_gz": round(float(gyro[2]), 5),
                 "hazard_contact_n": round(contact_n, 3), "contact_object": contact_obj,
+                "wheel_v_mps": round(WHEEL_RADIUS_M * float(data.qvel[wheel_dofs[0]] + data.qvel[wheel_dofs[1]]) / 2.0, 5),
             })
 
         if step % steps_per_frame == 0:
@@ -382,10 +427,13 @@ def run_episode(scenario: dict, condition: str, output_root: Path, seed: int, re
         },
         "camera": CAMERA,
         "rates": {"state_hz": STATE_HZ, "control_hz": CONTROL_HZ, "camera_hz": CAMERA["rate_hz"]},
-        "command": {"cruise_speed_mps": CRUISE_SPEED_MPS, "ramp_s": RAMP_S},
+        "command": {"cruise_speed_mps": CRUISE_SPEED_MPS, "ramp_s": RAMP_S, "disturbance": DrivingDisturbance.config()},
         "termination": termination,
         "wall_time_s": round(time.time() - wall_start, 2),
     }
+    if brake_test is not None:
+        meta["brake_test"] = {"spacing_m": BRAKE_SPACING_M, "first_m": BRAKE_FIRST_M[brake_test],
+                              "stops": [b for b in brakes if "distance_m" in b]}
     write_episode(episode_dir, scenario=scene, meta=meta, state_rows=state_rows, frame_rows=frame_rows)
     return episode_dir
 
@@ -407,11 +455,15 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--conditions", default="clean,hazard")
     parser.add_argument("--appearance", choices=APPEARANCE_REGIMES, default="default")
+    parser.add_argument("--brake-tests", action="store_true", help="also run a brake-test drive per condition")
     args = parser.parse_args()
     for seed in parse_seeds(args.seeds):
         scenario = create_warehouse_scenario(seed)
         for condition in args.conditions.split(","):
             path = run_episode(scenario, condition, args.output, seed, appearance_regime=args.appearance)
+            if args.brake_tests:
+                for index in range(len(BRAKE_FIRST_M)):
+                    run_episode(scenario, condition, args.output, seed, appearance_regime=args.appearance, brake_test=index)
             meta = (path / "meta.json").read_text()
             reason = meta.split('"reason": "')[1].split('"')[0]
             print(f"{path.name:28s} {reason}", flush=True)

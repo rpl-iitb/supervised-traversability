@@ -9,6 +9,7 @@ commands, so their episodes are comparable.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 
 
@@ -61,9 +62,10 @@ def route_command(route: Route, t_s: float, x_m: float, y_m: float, yaw_rad: flo
 class TerminationMonitor:
     """Goal / stall / timeout rules applied identically in every simulator."""
 
-    def __init__(self, route: Route, tail_m: float = LOOKAHEAD_TAIL_M):
+    def __init__(self, route: Route, tail_m: float = LOOKAHEAD_TAIL_M, timeout_s: float = TIMEOUT_S):
         self.route = route
         self.tail_m = tail_m
+        self.timeout_s = timeout_s
         self._stall_since: float | None = None
 
     def update(self, t_s: float, x_m: float, y_m: float, v_fwd_mps: float, cmd_v_mps: float) -> dict | None:
@@ -76,6 +78,44 @@ class TerminationMonitor:
                 return {"reason": "stalled", "t_s": round(t_s, 3), "progress_m": round(progress, 3)}
         else:
             self._stall_since = None
-        if t_s >= TIMEOUT_S:
+        if t_s >= self.timeout_s:
             return {"reason": "timeout", "t_s": round(t_s, 3), "progress_m": round(progress, 3)}
         return None
+
+
+# Small, smoothly varying command disturbances imitating real controller and
+# floor imperfections, so low-friction patches can actually cause slip.
+# ASSUMED magnitudes (to confirm against a real robot's logs).
+YAW_WOBBLE_SIGMA_RPS = 0.08
+YAW_WOBBLE_TAU_S = 0.5
+SPEED_WOBBLE_SIGMA_MPS = 0.03
+SPEED_WOBBLE_TAU_S = 1.0
+
+
+class DrivingDisturbance:
+    """Ornstein-Uhlenbeck wobble added to (v, w) commands.
+
+    Seeded per scene, so a scene's hazard run and its clean twin receive the
+    identical disturbance sequence and remain a fair pair.
+    """
+
+    def __init__(self, seed: int, enabled: bool = True):
+        self.rng = random.Random(1_000_003 * (seed + 1))
+        self.enabled = enabled
+        self.dv = 0.0
+        self.dw = 0.0
+
+    def step(self, dt_s: float) -> tuple[float, float]:
+        if not self.enabled:
+            return 0.0, 0.0
+        for attr, sigma, tau in (("dv", SPEED_WOBBLE_SIGMA_MPS, SPEED_WOBBLE_TAU_S),
+                                 ("dw", YAW_WOBBLE_SIGMA_RPS, YAW_WOBBLE_TAU_S)):
+            decay = math.exp(-dt_s / tau)
+            value = getattr(self, attr) * decay + sigma * math.sqrt(1.0 - decay * decay) * self.rng.gauss(0.0, 1.0)
+            setattr(self, attr, value)
+        return self.dv, self.dw
+
+    @staticmethod
+    def config() -> dict:
+        return {"yaw_sigma_rps": YAW_WOBBLE_SIGMA_RPS, "yaw_tau_s": YAW_WOBBLE_TAU_S,
+                "speed_sigma_mps": SPEED_WOBBLE_SIGMA_MPS, "speed_tau_s": SPEED_WOBBLE_TAU_S}

@@ -71,7 +71,7 @@ class EpisodeIoTest(unittest.TestCase):
         self.assertEqual(episode["frames"][0]["frame_idx"], 0)
         self.assertEqual(episode["frames"][0]["rgb_path"], "rgb/000000.png")
         self.assertEqual(episode["state"][0]["contact_object"], "")
-        self.assertEqual(episode["meta"]["format_version"], "1.0")
+        self.assertEqual(episode["meta"]["format_version"], "1.1")
 
 
 if __name__ == "__main__":
