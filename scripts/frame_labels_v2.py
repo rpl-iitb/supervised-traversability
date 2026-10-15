@@ -57,11 +57,25 @@ class Settings:
     # is crossed ~1.5 times per clean drive by chance.
     abnormal_run_quantile: float = 0.95
     merge_gap_m: float = 0.49         # one robot contact span: front-wheel and caster bursts merge
+    # Skid-steer robots (Jackal) slip by design whenever they turn, so slip only
+    # counts while the commanded turn rate is below this. inf = always counts.
+    slip_max_turn_rps: float = math.inf
     # --- unacceptable = requirements (PLACEHOLDERS, to confirm) --------------
     unacceptable_vib_mps2: float = 0.3
     unacceptable_delay_ratio: float = 1.5
     unacceptable_slip: float = 0.2
     braking_budget_mps2: float = 1.0  # same deceleration as the stopping-distance budget
+
+
+# Clearpath Jackal (J100): 4 wheels r = 0.098 m, axles at +/-0.131 m, track
+# 0.376 m, skid-steer. A wheel meets a 3 cm obstacle sqrt(0.098^2 - 0.068^2)
+# = 0.07 m ahead of (behind) its axle. strip_near_m must be re-checked against
+# the measured D435i mount (rosbag_to_episode writes nearest_visible_floor_m);
+# stopping distance 0.28 m + first contact 0.20 m = 0.48 m, so 0.6 m holds if
+# the camera sees the floor from 0.6 m.
+JACKAL = dict(front_contact_m=0.20, rear_contact_m=-0.20, drive_wheel_x_m=0.131, strip_near_m=0.6,
+              strip_far_m=1.8, strip_half_width_m=0.24, merge_gap_m=0.40, slip_max_turn_rps=0.1)
+ROBOTS = {"sim": {}, "jackal": JACKAL}
 
 
 # --------------------------------------------------------------------------- signals
@@ -89,7 +103,8 @@ def episode_signals(episode: dict, settings: Settings) -> dict:
     wheel = _moving_average(np.nan_to_num(wheel, nan=0.0), smooth) if not np.isnan(wheel).all() else v
     valid = (t > RAMP_S + 0.5) & (cmd > 0.2)
     ratio = np.where(valid, v / np.maximum(cmd, 1e-6), 1.0)
-    slip = np.where(valid, np.abs(wheel - v) / np.maximum(np.abs(v), 0.1), 0.0)
+    straight = ~(np.abs(_moving_average(col("cmd_w_rps"), smooth)) >= settings.slip_max_turn_rps)
+    slip = np.where(valid & straight, np.abs(wheel - v) / np.maximum(np.abs(v), 0.1), 0.0)
     return {"t": t, "progress": progress, "vib": np.where(valid, vib, 0.0), "ratio": ratio, "slip": slip,
             "valid": valid, "cmd": cmd, "route": route}
 
@@ -317,12 +332,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--episodes", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--robot", choices=sorted(ROBOTS), default="sim", help="robot geometry preset")
     parser.add_argument("--abnormal-run-quantile", type=float, default=Settings.abnormal_run_quantile)
     parser.add_argument("--strip-far-m", type=float, default=Settings.strip_far_m)
     parser.add_argument("--unacceptable-scale", type=float, default=1.0,
                         help="multiply the vibration/slip thresholds and (ratio-1) of the delay threshold (sensitivity)")
     args = parser.parse_args()
-    settings = Settings(abnormal_run_quantile=args.abnormal_run_quantile, strip_far_m=args.strip_far_m)
+    settings = Settings(**{**ROBOTS[args.robot], "abnormal_run_quantile": args.abnormal_run_quantile,
+                           **({"strip_far_m": args.strip_far_m} if args.strip_far_m != Settings.strip_far_m else {})})
     settings.unacceptable_vib_mps2 *= args.unacceptable_scale
     settings.unacceptable_slip *= args.unacceptable_scale
     settings.unacceptable_delay_ratio = 1.0 + (settings.unacceptable_delay_ratio - 1.0) * args.unacceptable_scale
