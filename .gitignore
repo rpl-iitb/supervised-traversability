@@ -30,3 +30,25 @@ data/episodes_shifted/
 data/gonet/
 data/episodes_v2/
 data/labels_v2/
+data/gonet_ours/
+data/gonet_rule/
+data/labels_gonet_rule/
+data/real/
+data/real_labels/
+
+# Local notes, kept out of the repo
+/0*_*.md
+/NOTES_*.md
+/NOTES_*.md
+/AGENT_HANDOFF.md
+/script.md
+/table.md
+/onepager.html
+/docs/
+/hardware/*.md
+/cloud/README.md
+/data/README.md
+/hpc/
+/hpc/
+/presentation/qa/
+/RPL Presentation Template.pdf
