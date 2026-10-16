@@ -1,4 +1,4 @@
-"""Result figures for the update deck, drawn from the saved result files only.
+"""Result figures for the update deck (point values, no intervals), drawn from the saved result files only.
 
     python3 -m presentation.results_figures
 Reads runs/ci/ci.json (scene-bootstrap intervals) and
@@ -40,14 +40,12 @@ def auroc(ci):
     fig, ax = plt.subplots(figsize=(13.33, 6.4), dpi=150)
     for row, (key, label, colour) in enumerate(MODELS):
         m = ci["models"][key]["auroc"]
-        lo, hi = m["ci95"]
         ax.barh(row, m["value"], color=colour, height=0.62)
-        ax.errorbar(m["value"], row, xerr=[[m["value"] - lo], [hi - m["value"]]], color="black", capsize=6, lw=1.6)
-        ax.text(hi + 0.008, row, f"{m['value']:.3f}", va="center", fontsize=16)
+        ax.text(m["value"] + 0.008, row, f"{m['value']:.3f}", va="center", fontsize=16)
     ax.set_yticks(range(len(MODELS)), [label for _, label, _ in MODELS], fontsize=16)
     ax.axvline(0.5, color="black", ls=":", lw=1)
     ax.set_xlim(0.4, 1.04)
-    ax.set_xlabel("AUROC (95 % interval over test scenes)", fontsize=15)
+    ax.set_xlabel("AUROC", fontsize=15)
     style(ax)
     fig.tight_layout()
     fig.savefig(OUT / "results_auroc.png")
@@ -63,11 +61,8 @@ def per_hazard(ci):
     for j, (key, label, colour) in enumerate(chosen):
         vals = [ci["models"][key][f"flag_{h}"] for h, _ in HAZARDS]
         v = np.array([d["value"] for d in vals]) * 100
-        lo = np.array([d["ci95"][0] for d in vals]) * 100
-        hi = np.array([d["ci95"][1] for d in vals]) * 100
         pos = x - 0.4 + width * (j + 0.5)
         ax.bar(pos, v, width * 0.92, color=colour, label=label)
-        ax.errorbar(pos, v, yerr=[v - lo, hi - v], fmt="none", color="black", capsize=3, lw=1.1)
     ax.axvline(len(HAZARDS) - 1.5, color="black", lw=0.8)
     ax.set_xticks(x, [name for _, name in HAZARDS], fontsize=17)
     ax.set_ylabel("% of photos flagged not traversable", fontsize=15)
