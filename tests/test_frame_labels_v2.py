@@ -86,6 +86,58 @@ class ZoneTest(unittest.TestCase):
         self.assertLess(th["vib_mps2"], 0.05)
 
 
+class RealRobotSettingsTest(unittest.TestCase):
+    REAL = Settings(steady_after_start_s=1.0, steady_before_stop_s=0.2, min_frame_speed_mps=0.2, severity="peak",
+                    unacceptable_vib_clean_multiple=2.0)
+
+    def teleop(self, bursts_at=(), vib=2.0, start_s=3.0, stop_x=5.0):
+        """Parked, then a teleop drive to stop_x, then parked; jolts at both ends of the drive."""
+        ep = episode(bursts_at=bursts_at, vib=vib)
+        state, frames, x, dt = [], [], 0.0, 0.01
+        for i in range(int(14.0 / dt)):
+            t = i * dt
+            driving = t >= start_s and x < stop_x
+            speed = 0.5 if driving else 0.0
+            x += speed * dt
+            jolt = abs(t - start_s) < 0.05 or abs(x - stop_x) < 0.01
+            shake = any(abs(x - b) < 0.03 for b in bursts_at)
+            az = 9.81 + (3.0 if jolt else 0.0) * (1 if i % 2 else -1) + (vib * (1 if i % 2 else -1) if shake else 0.0)
+            state.append({**ep["state"][0], "t_s": t, "x_m": x, "v_fwd_mps": speed, "cmd_v_mps": 0.5 if driving else 0.0,
+                          "imu_az": az, "wheel_v_mps": speed})
+            if i % 10 == 0:
+                frames.append({"frame_idx": len(frames), "t_s": t, "x_m": x, "y_m": 0.0, "yaw_rad": 0.0, "rgb_path": "x.jpg"})
+        return {**ep, "state": state, "frames": frames}
+
+    def test_start_and_stop_jolts_make_no_zone(self):
+        ep = self.teleop()
+        zones = drive_zones(episode_signals(ep, self.REAL), THRESHOLDS, ep["meta"]["termination"], self.REAL)
+        self.assertEqual(zones, [])
+
+    def test_limit_is_relative_to_clean_level_and_uses_peak(self):
+        settings_thresholds = {**THRESHOLDS, "vib_mps2": 0.5}
+        mild, hard = self.teleop(bursts_at=[2.5], vib=0.8), self.teleop(bursts_at=[2.5], vib=2.0)
+        for ep, expected in ((mild, False), (hard, True)):
+            zones = drive_zones(episode_signals(ep, self.REAL), settings_thresholds, ep["meta"]["termination"], self.REAL)
+            self.assertEqual(len(zones), 1)
+            self.assertEqual(zones[0]["unacceptable"], expected)
+
+    def test_roll_alone_makes_a_zone_and_can_be_unacceptable(self):
+        real = Settings(steady_after_start_s=1.0, steady_before_stop_s=0.2, severity="peak", use_roll=True,
+                        unacceptable_vib_clean_multiple=2.0, unacceptable_roll_clean_multiple=2.0)
+        ep = self.teleop()
+        ep["state"] = [{**row, "imu_gx": 0.5 if abs(row["x_m"] - 2.5) < 0.03 else 0.0} for row in ep["state"]]
+        thresholds = {**THRESHOLDS, "vib_mps2": 0.5, "roll_rps": 0.04}
+        zones = drive_zones(episode_signals(ep, real), thresholds, ep["meta"]["termination"], real)
+        self.assertEqual([z["cause"] for z in zones], ["roll"])
+
+    def test_parked_photos_are_dropped(self):
+        ep = self.teleop()
+        rows = label_episode(ep, [], self.REAL)
+        self.assertEqual(rows[0]["reason"], "not_moving")
+        self.assertEqual(rows[-1]["reason"], "not_moving")
+        self.assertTrue(any(r["reason"] == "normal" for r in rows))
+
+
 class PhotoLabelTest(unittest.TestCase):
     def setUp(self):
         self.ep = episode(bursts_at=cable_bursts())

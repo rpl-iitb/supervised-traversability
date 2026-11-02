@@ -4,8 +4,8 @@ Agreed design (see NOTES_labelling_and_gonet_2026-10-07.md):
 
 1. Find bad moments from the robot's own 100 Hz signals: shaking (vertical
    acceleration), slow-down (smoothed speed / commanded speed), slip (wheel
-   encoder speed vs ground speed), stalls, and long emergency stops in the
-   separate brake-test drive. "Abnormal" thresholds are MEASURED from the
+   encoder speed vs ground speed), effort (motor current, real Jackal only),
+   stalls, and long emergency stops in the separate brake-test drive. "Abnormal" thresholds are MEASURED from the
    clean-twin drives; "unacceptable" thresholds are stated requirements
    (placeholders to confirm with the professor / ATI).
 2. Turn each bad moment into a bad piece of floor along the route: from the
@@ -65,6 +65,39 @@ class Settings:
     unacceptable_delay_ratio: float = 1.5
     unacceptable_slip: float = 0.2
     braking_budget_mps2: float = 1.0  # same deceleration as the stopping-distance budget
+    # --- effort: motor current (episodes with motor_current_* columns only) --
+    # Accelerating and turning raise the current too, so effort only counts
+    # during steady straight driving: commanded speed unchanged (slope below
+    # effort_cmd_change_mps2) for effort_settle_s, and turn command below
+    # effort_max_turn_rps. A hazard that slows the robot under a constant
+    # command still counts: the controller pushes harder, which is the signal.
+    effort_window_s: float = 0.1
+    effort_settle_s: float = 1.0
+    effort_cmd_change_mps2: float = 0.05
+    effort_max_turn_rps: float = 0.1
+    # PLACEHOLDER requirement: a crossing that needs this multiple of the clean
+    # steady-driving current (median over clean drives) is unacceptable.
+    unacceptable_effort_ratio: float = 2.0
+    # --- real robot (defaults keep the simulator behaviour unchanged) --------
+    # Teleop starts at any time, so "valid" means steady driving: this long
+    # after the command rose (start jolt) and this long before it fell (stop jolt).
+    steady_after_start_s: float | None = None
+    steady_before_stop_s: float = 0.0
+    # Photos taken below this speed are dropped (parked or ramping duplicates).
+    min_frame_speed_mps: float | None = None
+    # Severity of a crossing: "crossing_rms" (simulator) or "peak" (real robot).
+    severity: str = "crossing_rms"
+    # When set, "unacceptable" shaking / effort = this multiple of the level
+    # measured from clean drives, replacing the absolute placeholders above.
+    unacceptable_vib_clean_multiple: float | None = None
+    unacceptable_effort_clean_multiple: float | None = None
+    # Roll rate (rad/s, RMS over vib_window_s): a wheel climbing something tips the robot.
+    use_roll: bool = False
+    unacceptable_roll_clean_multiple: float | None = None
+    # Motor current in the abnormal test (0.4 m/s real data: it does not separate hazards).
+    use_effort: bool = True
+    # Speed dips in the abnormal test (teleop: steering corrections also dip it).
+    use_speed_ratio: bool = True
 
 
 # Clearpath Jackal (J100): 4 wheels r = 0.098 m, axles at +/-0.131 m, track
@@ -75,7 +108,14 @@ class Settings:
 # the camera sees the floor from 0.6 m.
 JACKAL = dict(front_contact_m=0.20, rear_contact_m=-0.20, drive_wheel_x_m=0.131, strip_near_m=0.6,
               strip_far_m=1.8, strip_half_width_m=0.24, merge_gap_m=0.40, slip_max_turn_rps=0.1)
-ROBOTS = {"sim": {}, "jackal": JACKAL}
+# The real j100-0952 at 0.4 m/s: nearest visible floor 0.64 m, far edge = near + 0.4 m/s x 2.4 s.
+# Limits are "twice the worst level seen on clean floor", fixed before any model was trained.
+JACKAL_REAL = {**JACKAL, "strip_near_m": 0.65, "strip_far_m": 1.61, "steady_after_start_s": 1.0,
+               "steady_before_stop_s": 0.2, "min_frame_speed_mps": 0.2, "severity": "peak",
+               "unacceptable_vib_clean_multiple": 2.0, "use_roll": True, "unacceptable_roll_clean_multiple": 2.0,
+               "use_effort": False, "unacceptable_delay_ratio": math.inf, "unacceptable_slip": math.inf,
+               "use_speed_ratio": False, "strip_half_width_m": 10.0}
+ROBOTS = {"sim": {}, "jackal": JACKAL, "jackal_real": JACKAL_REAL}
 
 
 # --------------------------------------------------------------------------- signals
@@ -102,25 +142,74 @@ def episode_signals(episode: dict, settings: Settings) -> dict:
     wheel = col("wheel_v_mps") if "wheel_v_mps" in state[0] else np.full(len(state), np.nan)
     wheel = _moving_average(np.nan_to_num(wheel, nan=0.0), smooth) if not np.isnan(wheel).all() else v
     valid = (t > RAMP_S + 0.5) & (cmd > 0.2)
+    if settings.steady_after_start_s is not None:
+        valid = steady_mask(t, col("cmd_v_mps"), settings)
     ratio = np.where(valid, v / np.maximum(cmd, 1e-6), 1.0)
     straight = ~(np.abs(_moving_average(col("cmd_w_rps"), smooth)) >= settings.slip_max_turn_rps)
     slip = np.where(valid & straight, np.abs(wheel - v) / np.maximum(np.abs(v), 0.1), 0.0)
+    effort, steady = effort_signal(state, t, cmd, col, valid, hz, settings)
+    roll = None
+    if settings.use_roll:
+        roll = np.where(valid, np.sqrt(_moving_average(col("imu_gx") ** 2, round(settings.vib_window_s * hz))), 0.0)
     return {"t": t, "progress": progress, "vib": np.where(valid, vib, 0.0), "ratio": ratio, "slip": slip,
-            "valid": valid, "cmd": cmd, "route": route}
+            "valid": valid, "cmd": cmd, "route": route, "effort": effort, "effort_steady": steady,
+            "has_effort": effort is not None and settings.use_effort, "roll": roll}
+
+
+def steady_mask(t: np.ndarray, raw_cmd: np.ndarray, settings: Settings) -> np.ndarray:
+    """Samples of steady commanded driving, away from the start and stop jolts of each drive segment."""
+    active = raw_cmd > 0.2
+    mask = np.zeros(len(t), bool)
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], active.astype(int), [0]))))
+    for first, stop in zip(edges[::2], edges[1::2]):
+        mask |= (t >= t[first] + settings.steady_after_start_s) & (t <= t[stop - 1] - settings.steady_before_stop_s)
+    return mask
+
+
+def effort_signal(state, t, cmd, col, valid, hz, settings: Settings):
+    """Mean absolute motor current of both sides (A) during steady straight driving, else 0.
+
+    Returns (None, None) when the episode has no motor current (simulators)."""
+    names = ("motor_current_l_a", "motor_current_r_a")
+    if not all(name in state[0] for name in names):
+        return None, None
+    current = (np.abs(col(names[0])) + np.abs(col(names[1]))) / 2.0
+    if np.isnan(current).all():
+        return None, None
+    current = _moving_average(np.nan_to_num(current, nan=0.0), round(settings.effort_window_s * hz))
+    changing = np.abs(np.gradient(cmd, t)) > settings.effort_cmd_change_mps2 if len(t) > 1 else np.zeros(len(t), bool)
+    change_times = t[changing]
+    last_change = np.full(len(t), -np.inf)
+    if len(change_times):
+        idx = np.searchsorted(change_times, t, side="right") - 1
+        last_change = np.where(idx >= 0, change_times[np.clip(idx, 0, None)], -np.inf)
+    turning = np.abs(_moving_average(col("cmd_w_rps"), round(settings.speed_smooth_s * hz))) >= settings.effort_max_turn_rps
+    steady = valid & ~turning & (t - last_change >= settings.effort_settle_s)
+    return np.where(steady, current, 0.0), steady
 
 
 # --------------------------------------------------------------------------- calibration
 
 def calibrate(clean_main: list[dict], clean_brake: list[dict], settings: Settings) -> dict:
     """'Abnormal' thresholds measured from the clean-twin drives (per drive)."""
-    vib_max, ratio_min, slip_max = [], [], []
+    vib_max, ratio_min, slip_max, effort_max, effort_samples, roll_max = [], [], [], [], [], []
     for episode in clean_main:
         s = episode_signals(episode, settings)
         v = s["valid"]
         vib_max.append(s["vib"][v].max()), ratio_min.append(s["ratio"][v].min()), slip_max.append(s["slip"][v].max())
+        if s["roll"] is not None:
+            roll_max.append(s["roll"][v].max())
+        if s["has_effort"] and s["effort_steady"].any():
+            effort_max.append(s["effort"][s["effort_steady"]].max())
+            effort_samples.append(s["effort"][s["effort_steady"]])
     q = settings.abnormal_run_quantile
     stop_max = [max(stop["distance_m"] for stop in e["meta"]["brake_test"]["stops"]) for e in clean_brake
                 if e["meta"]["brake_test"]["stops"]]
+    effort = {"roll_rps": float(np.quantile(roll_max, q))} if roll_max else {}
+    if effort_max:
+        effort.update({"effort_a": float(np.quantile(effort_max, q)),
+                       "effort_baseline_a": float(np.median(np.concatenate(effort_samples))),
+                       "clean_drives_with_effort": len(effort_max)})
     return {
         "vib_mps2": float(np.quantile(vib_max, q)),
         "speed_ratio": float(np.quantile(ratio_min, 1.0 - q)),
@@ -128,15 +217,41 @@ def calibrate(clean_main: list[dict], clean_brake: list[dict], settings: Setting
         "brake_stop_m": float(np.quantile(stop_max, q)) if stop_max else math.inf,
         "clean_drives": len(vib_max),
         "clean_brake_drives": len(stop_max),
+        **effort,
     }
 
 
 # --------------------------------------------------------------------------- zones
 
+def _unacceptable_roll(thresholds: dict, settings: Settings) -> float:
+    if settings.unacceptable_roll_clean_multiple is None or "roll_rps" not in thresholds:
+        return math.inf
+    return settings.unacceptable_roll_clean_multiple * thresholds["roll_rps"]
+
+
+def _unacceptable_limits(thresholds: dict, settings: Settings) -> tuple[float, float | None]:
+    vib = settings.unacceptable_vib_mps2
+    if settings.unacceptable_vib_clean_multiple is not None:
+        vib = settings.unacceptable_vib_clean_multiple * thresholds["vib_mps2"]
+    effort = None
+    if settings.unacceptable_effort_clean_multiple is not None and "effort_a" in thresholds:
+        effort = settings.unacceptable_effort_clean_multiple * thresholds["effort_a"]
+    return vib, effort
+
+
 def drive_zones(signals: dict, thresholds: dict, termination: dict, settings: Settings) -> list[dict]:
     p, valid = signals["progress"], signals["valid"]
-    abnormal = valid & ((signals["vib"] > thresholds["vib_mps2"]) | (signals["ratio"] < thresholds["speed_ratio"])
-                        | (signals["slip"] > thresholds["slip"]))
+    limit_vib, limit_effort = _unacceptable_limits(thresholds, settings)
+    abnormal = valid & ((signals["vib"] > thresholds["vib_mps2"]) | (signals["slip"] > thresholds["slip"]))
+    if settings.use_speed_ratio:
+        abnormal |= valid & (signals["ratio"] < thresholds["speed_ratio"])
+    use_effort = signals["has_effort"] and "effort_a" in thresholds
+    if use_effort:
+        abnormal |= signals["effort_steady"] & (signals["effort"] > thresholds["effort_a"])
+    use_roll = signals.get("roll") is not None and "roll_rps" in thresholds
+    if use_roll:
+        abnormal |= signals["roll"] > thresholds["roll_rps"]
+    limit_roll = _unacceptable_roll(thresholds, settings)
     bursts, start = [], None
     for i, flag in enumerate(abnormal):
         if flag and start is None:
@@ -168,9 +283,21 @@ def drive_zones(signals: dict, thresholds: dict, termination: dict, settings: Se
             crossing_vib = float(np.sqrt(np.mean(signals["vib"][idx] ** 2)))
         stats = {"crossing_vib": round(crossing_vib, 3), "peak_vib": float(signals["vib"][a:b + 1].max()), "min_speed_ratio": float(signals["ratio"][a:b + 1].min()),
                  "max_slip": float(signals["slip"][a:b + 1].max()), "delay_ratio": round(delay, 3)}
-        causes = [name for name, bad in (("vibration", stats["crossing_vib"] >= settings.unacceptable_vib_mps2),
+        effort_bad = False
+        if use_effort:
+            stats["peak_effort_a"] = round(float(signals["effort"][a:b + 1].max()), 3)
+            stats["effort_ratio"] = round(stats["peak_effort_a"] / max(thresholds["effort_baseline_a"], 1e-6), 3)
+            effort_bad = stats["effort_ratio"] >= settings.unacceptable_effort_ratio
+            if settings.unacceptable_effort_clean_multiple is not None:
+                effort_bad = limit_effort is not None and stats["peak_effort_a"] >= limit_effort
+        severity_vib = stats["peak_vib"] if settings.severity == "peak" else stats["crossing_vib"]
+        if use_roll:
+            stats["peak_roll"] = round(float(signals["roll"][a:b + 1].max()), 3)
+        causes = [name for name, bad in (("vibration", severity_vib >= limit_vib),
+                                         ("roll", use_roll and stats["peak_roll"] >= limit_roll),
                                          ("delay", delay >= settings.unacceptable_delay_ratio),
-                                         ("slip", stats["max_slip"] >= settings.unacceptable_slip)) if bad]
+                                         ("slip", stats["max_slip"] >= settings.unacceptable_slip),
+                                         ("effort", effort_bad)) if bad]
         zones.append({"lo": round(float(lo), 3), "hi": round(float(hi), 3), "source": "drive",
                       "unacceptable": bool(causes), "cause": "+".join(causes) or "abnormal", **stats})
     if termination.get("reason") in ("stalled", "timeout"):
@@ -212,6 +339,7 @@ def label_episode(episode: dict, zones: list[dict], settings: Settings) -> list[
     signals = episode_signals(episode, settings)
     route: Route = signals["route"]
     reached = float(signals["progress"].max()) + settings.rear_contact_m
+    speed = np.array([float(row["v_fwd_mps"]) for row in episode["state"]])
     hazards = [o for o in scenario.get("objects", []) if o.get("role", "target_hazard") == "target_hazard"]
     rows = []
     for frame in episode["frames"]:
@@ -234,7 +362,10 @@ def label_episode(episode: dict, zones: list[dict], settings: Settings) -> list[
             row["tracking"] = round(float(signals["ratio"][window].mean()), 3)
             row["vibration_rms"] = round(float(np.sqrt(np.mean(signals["vib"][window] ** 2))), 3)
         touching = [z for z in zones if z["lo"] <= hi and z["hi"] >= lo]
-        if s > route.length_m:
+        moving = settings.min_frame_speed_mps is None or np.interp(frame["t_s"], signals["t"], speed) >= settings.min_frame_speed_mps
+        if not moving:
+            y, reason = None, "not_moving"
+        elif s > route.length_m:
             y, reason = None, "beyond_route"
         elif any(z["unacceptable"] for z in touching):
             y, reason = 0, "unacceptable"

@@ -53,3 +53,6 @@ data/real_labels/
 /presentation/qa/
 /RPL Presentation Template.pdf
 /hpc/README.md
+data/real_bags/
+data/real/
+/hardware/robot_scan_*/

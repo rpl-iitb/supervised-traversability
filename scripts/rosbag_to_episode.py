@@ -28,6 +28,12 @@ What it does:
   Drive along a taped straight line.
 * Hazard positions measured with a tape (distance along the line) can be given
   with ``--hazard``; they are used only for the truth check, never for labels.
+* Motor feedback (Clearpath ``platform/motors/feedback``,
+  clearpath_platform_msgs/Feedback, 50 Hz), when recorded, fills the optional
+  ``motor_current_{l,r}_a`` and ``motor_vel_{l,r}_rps`` columns (driver 0 =
+  left, 1 = right). The type is decoded from the definition embedded in the
+  bag (MCAP and rosbag2 v8 store it); for older bags the bundled copy of
+  Clearpath's .msg files is used.
 
 Known limitation: if ``--odom`` is the wheel-based odometry, ground speed and
 wheel speed are the same signal and slip is invisible. Use a ground-speed
@@ -40,6 +46,7 @@ import argparse
 import io
 import json
 import math
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -48,17 +55,52 @@ from scripts.episode_io import write_episode
 
 STATE_HZ = 100.0
 
-# Candidate topic names, first match wins. ROS 1 Jackal (Noetic), ROS 2 Jackal
-# (clearpath_robot, namespaced e.g. /j100_0123/...), realsense2_camera.
+# Candidate topic names, first match wins; a candidate also matches any topic
+# that ends with it. ROS 1 Jackal (Noetic), ROS 2 Jackal (clearpath_robot,
+# namespaced e.g. /j100_0434/..., camera under sensors/camera_0/color/...),
+# realsense2_camera (/camera/camera/color/...). Colour only: depth never matches.
 TOPIC_CANDIDATES = {
     "odom": ("/odometry/filtered", "/platform/odom/filtered"),
     "wheel_odom": ("/jackal_velocity_controller/odom", "/platform/odom"),
     "cmd": ("/jackal_velocity_controller/cmd_vel", "/platform/cmd_vel", "/cmd_vel"),
     "imu": ("/imu/data", "/sensors/imu_0/data", "/camera/imu", "/camera/camera/imu"),
-    "image": ("/camera/color/image_raw/compressed", "/camera/camera/color/image_raw/compressed",
-              "/camera/color/image_raw", "/camera/camera/color/image_raw"),
-    "camera_info": ("/camera/color/camera_info", "/camera/camera/color/camera_info"),
+    "image": ("/color/image_raw/compressed", "/color/image/compressed", "/color/compressed",
+              "/color/image_raw", "/color/image"),
+    "camera_info": ("/color/camera_info",),
+    "motors": ("/platform/motors/feedback",),
 }
+
+# clearpath_platform_msgs (github.com/clearpathrobotics/clearpath_msgs, branch jazzy), comments removed.
+# Only used when a bag does not carry its own message definitions.
+CLEARPATH_MSGS = {
+    "clearpath_platform_msgs/msg/DriveFeedback": """
+float32 current
+float32 duty_cycle
+float32 bridge_temperature
+float32 motor_temperature
+float32 measured_velocity
+float32 measured_travel
+bool driver_fault
+""",
+    "clearpath_platform_msgs/msg/Feedback": """
+std_msgs/Header header
+DriveFeedback[2] drivers
+int8 commanded_mode
+int8 actual_mode
+""",
+}
+
+
+def clearpath_typestore():
+    """ROS 2 Jazzy typestore that also knows Clearpath's motor feedback types."""
+    from rosbags.typesys import Stores, get_types_from_msg, get_typestore
+
+    store = get_typestore(Stores.ROS2_JAZZY)
+    types = {}
+    for name, text in CLEARPATH_MSGS.items():
+        types.update(get_types_from_msg(text, name))
+    store.register(types)
+    return store
 
 
 def pick_topic(available: list[str], role: str, override: str | None) -> str | None:
@@ -70,7 +112,11 @@ def pick_topic(available: list[str], role: str, override: str | None) -> str | N
         exact = [t for t in available if t == candidate]
         namespaced = [t for t in available if t.endswith(candidate)]
         if exact or namespaced:
-            return (exact or namespaced)[0]
+            chosen = (exact or namespaced)[0]
+            if not exact and len(namespaced) > 1:
+                print(f"note: several {role} topics end with {candidate!r}; using {chosen} "
+                      f"(pass --{role.replace('_', '-')} to choose)", file=sys.stderr)
+            return chosen
     return None
 
 
@@ -116,7 +162,7 @@ def read_bag(bag: Path, topics: dict) -> dict:
     from rosbags.highlevel import AnyReader
 
     out = {role: [] for role in topics}
-    with AnyReader([bag]) as reader:
+    with AnyReader([bag], default_typestore=clearpath_typestore()) as reader:
         wanted = {t: role for role, t in topics.items() if t}
         connections = [c for c in reader.connections if c.topic in wanted]
         for connection, bag_time, raw in reader.messages(connections=connections):
@@ -161,6 +207,14 @@ def resample_state(msgs: dict, *, imu_frame: str, pitch_down_deg: float, cmd_tim
     wheel = msgs.get("wheel_odom", [])
     wheel_v = _interp(grid, np.array([m[0] for m in wheel]), [m[1].twist.twist.linear.x for m in wheel]) if wheel else np.full(len(grid), np.nan)
 
+    motor = {name: np.full(len(grid), np.nan) for name in ("motor_current_l_a", "motor_current_r_a", "motor_vel_l_rps", "motor_vel_r_rps")}
+    motors = msgs.get("motors", [])
+    if motors:
+        t_motor = np.array([m[0] for m in motors])
+        for side, index in (("l", 0), ("r", 1)):
+            motor[f"motor_current_{side}_a"] = _interp(grid, t_motor, [m[1].drivers[index].current for m in motors])
+            motor[f"motor_vel_{side}_rps"] = _interp(grid, t_motor, [m[1].drivers[index].measured_velocity for m in motors])
+
     cmd_v, cmd_w = np.zeros(len(grid)), np.zeros(len(grid))
     cmd = msgs.get("cmd", [])
     if cmd:
@@ -203,6 +257,7 @@ def resample_state(msgs: dict, *, imu_frame: str, pitch_down_deg: float, cmd_tim
             "imu_gx": float(gyr[i, 0]), "imu_gy": float(gyr[i, 1]), "imu_gz": float(gyr[i, 2]),
             "hazard_contact_n": "", "contact_object": "",
             "wheel_v_mps": "" if np.isnan(wheel_v[i]) else float(wheel_v[i]),
+            **{name: "" if np.isnan(values[i]) else float(values[i]) for name, values in motor.items()},
         })
     return rows, float(grid[0])
 
@@ -252,7 +307,7 @@ def nearest_visible_floor_m(camera: dict) -> float:
 
 def convert(bag: Path, out: Path, *, episode_id: str, condition: str, mount_xyz_m, pitch_down_deg: float,
             imu_frame: str, frame_hz: float, image_scale: float, hazards: list[str], termination: str,
-            cmd_timeout_s: float, overrides: dict) -> dict:
+            cmd_timeout_s: float, overrides: dict, rotate_180: bool = False) -> dict:
     available = list_topics(bag)
     topics = {role: pick_topic(available, role, overrides.get(role)) for role in TOPIC_CANDIDATES}
     for role in ("odom", "imu", "image", "camera_info"):
@@ -260,11 +315,18 @@ def convert(bag: Path, out: Path, *, episode_id: str, condition: str, mount_xyz_
             raise SystemExit(f"No {role} topic found; pass --{role.replace('_', '-')}. Topics: {available}")
     if topics["cmd"] is None:
         print("warning: no velocity command topic; every sample will look idle to the labeller")
+    if topics["motors"] is None:
+        print("note: no motor feedback topic; the motor current columns stay empty")
     msgs = read_bag(bag, topics)
     rows, t0 = resample_state(msgs, imu_frame=imu_frame, pitch_down_deg=pitch_down_deg, cmd_timeout_s=cmd_timeout_s)
     route = straight_route(rows)
 
     camera = camera_from_info(msgs["camera_info"][0][1], mount_xyz_m, pitch_down_deg, frame_hz, image_scale)
+    if rotate_180:
+        # Camera mounted upside down: photos are saved turned upright, so the principal point mirrors.
+        camera["cx"] = round(camera["width"] - camera["cx"], 3)
+        camera["cy"] = round(camera["height"] - camera["cy"], 3)
+        camera["rotated_180"] = True
     (out / "rgb").mkdir(parents=True, exist_ok=True)
     t_grid = np.array([r["t_s"] for r in rows])
     frames, next_t = [], 0.0
@@ -276,6 +338,8 @@ def convert(bag: Path, out: Path, *, episode_id: str, condition: str, mount_xyz_
         image = decode_image(msg, msgtype)
         if image_scale != 1.0:
             image = image.resize((camera["width"], camera["height"]))
+        if rotate_180:
+            image = image.rotate(180)
         name = f"rgb/{len(frames):06d}.jpg"
         image.save(out / name, quality=92)
         frames.append({"frame_idx": len(frames), "t_s": round(t, 4), "x_m": rows[i]["x_m"], "y_m": rows[i]["y_m"],
@@ -296,15 +360,16 @@ def convert(bag: Path, out: Path, *, episode_id: str, condition: str, mount_xyz_
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("bag", type=Path, help="ROS 1 .bag file or ROS 2 bag directory")
-    parser.add_argument("--out", type=Path, required=True, help="episode directory to create")
+    parser.add_argument("--out", type=Path, help="episode directory to create (required unless --list-topics)")
     parser.add_argument("--episode-id", help="default: the output directory name")
-    parser.add_argument("--condition", choices=("clean", "hazard"), required=True)
-    parser.add_argument("--camera-mount", type=float, nargs=3, required=True, metavar=("FWD_M", "LEFT_M", "UP_M"),
+    parser.add_argument("--condition", choices=("clean", "hazard"))
+    parser.add_argument("--camera-mount", type=float, nargs=3, metavar=("FWD_M", "LEFT_M", "UP_M"),
                         help="camera position relative to the robot centre on the floor (measure it)")
-    parser.add_argument("--camera-pitch-deg", type=float, required=True, help="downward tilt of the camera")
+    parser.add_argument("--camera-pitch-deg", type=float, help="downward tilt of the camera")
     parser.add_argument("--imu-frame", choices=("base", "optical"), default="base",
                         help="'base' for the Jackal IMU, 'optical' for the D435i IMU")
     parser.add_argument("--frame-hz", type=float, default=10.0)
+    parser.add_argument("--rotate-180", action="store_true", help="camera is mounted upside down: save photos upright")
     parser.add_argument("--image-scale", type=float, default=1.0, help="e.g. 0.5 to halve the saved resolution")
     parser.add_argument("--hazard", action="append", default=[], metavar="KIND:DIST_M[:RADIUS_M[:HEIGHT_M]]",
                         help="measured hazard position along the taped line (truth check only)")
@@ -317,9 +382,14 @@ def main() -> None:
     if args.list_topics:
         print("\n".join(list_topics(args.bag)))
         return
+    missing = [flag for flag, value in (("--out", args.out), ("--condition", args.condition),
+                                        ("--camera-mount", args.camera_mount), ("--camera-pitch-deg", args.camera_pitch_deg))
+               if value is None]
+    if missing:
+        parser.error("the following arguments are required: " + ", ".join(missing))
     result = convert(args.bag, args.out, episode_id=args.episode_id or args.out.name, condition=args.condition,
                      mount_xyz_m=args.camera_mount, pitch_down_deg=args.camera_pitch_deg, imu_frame=args.imu_frame,
-                     frame_hz=args.frame_hz, image_scale=args.image_scale, hazards=args.hazard,
+                     frame_hz=args.frame_hz, image_scale=args.image_scale, hazards=args.hazard, rotate_180=args.rotate_180,
                      termination=args.termination, cmd_timeout_s=args.cmd_timeout_s,
                      overrides={role: getattr(args, f"topic_{role}") for role in TOPIC_CANDIDATES})
     print(json.dumps(result, indent=2))

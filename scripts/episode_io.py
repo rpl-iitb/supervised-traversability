@@ -26,6 +26,9 @@ from pathlib import Path
 
 FORMAT_VERSION = "1.1"
 # 1.1 adds wheel_v_mps (wheel-encoder speed, for slip). 1.0 episodes still load.
+# The motor_* columns are optional additions within 1.1 (left/right motor-driver current in A and
+# wheel speed in rad/s, from a real Jackal's platform/motors/feedback). Simulators leave them empty;
+# episodes written before they existed simply lack them.
 READABLE_VERSIONS = {"1.0", "1.1"}
 
 STATE_COLUMNS = (
@@ -49,6 +52,10 @@ STATE_COLUMNS = (
     "hazard_contact_n",
     "contact_object",
     "wheel_v_mps",
+    "motor_current_l_a",
+    "motor_current_r_a",
+    "motor_vel_l_rps",
+    "motor_vel_r_rps",
 )
 FRAME_COLUMNS = ("frame_idx", "t_s", "x_m", "y_m", "yaw_rad", "rgb_path")
 _STRING_COLUMNS = {"contact_object", "rgb_path"}

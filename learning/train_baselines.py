@@ -49,6 +49,7 @@ UNOBSERVABLE_REASONS = {
     "no_command_in_window",
     "beyond_route",   # version 2 labeller
     "not_reached",
+    "not_moving",     # real robot: parked or ramping photos
 }
 HAZARD_MARGIN_M = 0.45
 
