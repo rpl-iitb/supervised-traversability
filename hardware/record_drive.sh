@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# UNVERIFIED: written before we had access to the robot. Check it on a short
-# pilot drive before relying on it.
+# Checked: used for every recorded drive (sessions s1a-s1c, 30 Oct 2026).
 #
 # Records one drive ON THE ROBOT into ~/btp_bags/<name>_<time>/ (MCAP format).
 # It finds the topics we need from whatever the robot publishes and leaves out
@@ -10,6 +9,7 @@
 #     bash record_drive.sh cable_01 "cable 2 cm thick at 3.0 m"
 #     bash record_drive.sh --dry-run test     # only print what it would record
 #
+# Hands-free: DURATION=40 bash record_drive.sh s1_r001   stops by itself after 40 s.
 # Stop with Ctrl+C at the end of the drive. It then prints `ros2 bag info` so
 # you can check on the spot that every topic is there.
 
@@ -36,10 +36,8 @@ WANT=(
   'platform/joint_states$'        # wheel positions and velocities
   'platform/mcu/status/stop$'     # e-stop / motor cutoff state
   'platform/bms/state$'           # battery
-  'cmd_vel'                       # every velocity command (joystick, cmd_vel_raw, filter output, mux output)
-  'gonogo/(flag|p_nogo|filter_state|filter_blocked)'  # safety-filter flags and decisions (demo/robot_nodes.py)
-  'platform/safety_stop$'         # the twist_mux lock the filter can assert
-  'sensors/imu_[0-9]+/data$'      # the Jackal's own IMU (the professor's choice)
+  'cmd_vel'                       # every velocity command (joystick, mux output)
+  'sensors/imu_[0-9]+/data$'      # the Jackal's own IMU
   '/imu/data$'
   'camera.*imu$'                  # the camera's IMU, if it has one (for comparison)
   'color/camera_info$'
@@ -48,6 +46,8 @@ WANT=(
   '^/tf$|/tf$'
   '^/tf_static$|/tf_static$'
   'diagnostics_agg$'
+  'gonogo/(state|z|image/compressed)$'  # live go/no-go decisions and annotated frames, when the node runs
+  'platform/safety_stop$'         # the lock the go/no-go gate holds
 )
 # Colour images: prefer compressed, fall back to raw.
 IMAGE_COMPRESSED='color/(image_raw/)?compressed$'
