@@ -1,0 +1,13 @@
+# Laptop / training side (Python 3.12)
+numpy>=1.26
+scipy
+scikit-learn>=1.4
+matplotlib>=3.8
+pillow>=10
+torch>=2.3
+torchvision>=0.18
+mujoco>=3.1          # simulation proxy (scripts/proxy_sim.py)
+rosbags>=0.10        # reading ROS 2 bags without ROS (scripts/rosbag_to_episode.py)
+onnx                 # exporting the go/no-go model (hardware/gonogo/export_onnx.py)
+onnxruntime>=1.18    # running the go/no-go model
+pytest

@@ -1,58 +1,28 @@
 # Python
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+.pytest_cache/
 
-# Generated Isaac Sim experiment output
+# Data, episodes, labels, checkpoints and logs (large or regenerable)
+data/
+runs/
 *.csv
+*.log
+
+# Large binaries of the live go/no-go (rebuild with hardware/gonogo/export_onnx.py)
+*.onnx
+hardware/gonogo/wheels/
 
 # Isaac Sim and Omniverse local state
 .nvidia-omniverse/
 .cache/
 
-# Credentials and private configuration
-.gcloud/
+# Credentials
 *.pem
 *.key
-credentials*.json
 .env
 
 # macOS
 .DS_Store
-
-# Generated episodes, labels and model checkpoints (regenerable)
-data/episodes/
-data/labels/
-runs/
-
-# Local logs and generated test sets
-*.log
-data/episodes_shifted/
-data/gonet/
-data/episodes_v2/
-data/labels_v2/
-data/gonet_ours/
-data/gonet_rule/
-data/labels_gonet_rule/
-data/real/
-data/real_labels/
-
-# Local notes, kept out of the repo
-/0*_*.md
-/NOTES_*.md
-/NOTES_*.md
-/AGENT_HANDOFF.md
-/script.md
-/table.md
-/onepager.html
-/docs/
-/hardware/*.md
-/cloud/README.md
-/data/README.md
-/hpc/
-/hpc/
-/presentation/qa/
-/RPL Presentation Template.pdf
-/hpc/README.md
-data/real_bags/
-data/real/
-/hardware/robot_scan_*/
