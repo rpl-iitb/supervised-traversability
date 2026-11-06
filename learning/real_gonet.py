@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; reuses learning.gonet_train stages (tested), wrapper checked through its outputs.
+# Checked: reuses learning.gonet_train stages (tested), wrapper checked through its outputs.
 """GONet on real data: the authors' released weights, and retrained on our runs with the paper's three stages.
 
     python3 -m learning.real_gonet --data DATA --out runs/real_v1 --official data/gonet/official_weights

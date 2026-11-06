@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 ROBOT_PATH = "/World/nova_carter_reference"
-LOG_DIRECTORY = Path("/home/user/isaac_assets")
+LOG_DIRECTORY = Path.home() / "isaac_assets"
 SETTLE_SECONDS = 1.0
 DRIVE_SECONDS = 5.0
 SAMPLE_PERIOD_SECONDS = 0.1

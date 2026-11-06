@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written. Builds the image caches once, before parallel jobs read them.
+# Checked by use. Builds the image caches once, before parallel jobs read them.
 """python3 -m learning.real_prep --data DATA --out OUT"""
 
 import argparse

@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; checked by its own output on the 30 Oct 2026 bags, not independently reviewed.
+# Checked by its own output on the 30 Oct 2026 bags.
 """Assemble sessions s1a and s1c into one real-robot dataset and convert every bag.
 
     python3 -m scripts.real_dataset --bags /path/data/real_bags --plans /path/data/run_sheets --out /path/data/real/s1

@@ -7,7 +7,7 @@ Agreed design (see NOTES_labelling_and_gonet_2026-10-07.md):
    encoder speed vs ground speed), effort (motor current, real Jackal only),
    stalls, and long emergency stops in the separate brake-test drive. "Abnormal" thresholds are MEASURED from the
    clean-twin drives; "unacceptable" thresholds are stated requirements
-   (placeholders to confirm with the professor / ATI).
+   (assumed values, not supplied by an industry partner).
 2. Turn each bad moment into a bad piece of floor along the route: from the
    front wheel contact when it started to the rear caster contact when it
    ended. Bursts closer than one robot contact span (front wheel hits, then

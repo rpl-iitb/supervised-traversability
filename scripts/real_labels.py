@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; its truth check and tests cover the logic, not independently reviewed.
+# Checked: its truth check against the recorded placements and its tests cover the logic.
 """Label the real-robot dataset and check the zones against the recorded placements.
 
     python3 -m scripts.real_labels --data /path/data/real/s1

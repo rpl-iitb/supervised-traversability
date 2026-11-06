@@ -12,10 +12,10 @@ RTX workstation)::
         --output /scratch/$USER/episodes
 
 Status: written against the Isaac Sim 4.5/5.x ``isaacsim.*`` Python API and
-**not run end to end**. Run ``--check-only`` first; it loads the stage,
+**not run end to end; the results in this repository use the MuJoCo proxy**. Run ``--check-only`` first; it loads the stage,
 spawns the scenario, validates the route and exits without driving.
 
-Honest limits, unchanged from the handoff: the oil spill is visual-only in
+Known limits: the oil spill is visual-only in
 Isaac (no friction material yet), and the procedural hazards are first-pass
 assets. The robot is driven by the shared scripted route follower rather
 than a human teleoperator; teleoperation will reuse the same recorder.

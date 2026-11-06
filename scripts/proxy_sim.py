@@ -4,7 +4,7 @@ This is a *pipeline-validation* simulator, not a replacement for Isaac Sim.
 It consumes exactly the same scenario manifests as the Isaac spawner and
 writes exactly the same episode format as the Isaac collector, so the
 labelling and training code can be developed and tested end to end while
-An Isaac Sim collector is in isaac/.
+An Isaac Sim collector is in isaac/ but was not used for the results.
 
 What is modelled:
   * a Nova-Carter-sized differential-drive robot (two driven wheels, two

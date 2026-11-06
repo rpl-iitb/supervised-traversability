@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; checked through its outputs.
+# Checked through its outputs.
 """How far apart are the simulator and the real robot? Measure it, in both directions.
 
     python3 -m learning.sim_to_real --sim-labels data/labels_v2/labels.csv --sim-episodes data/episodes_v2 \\

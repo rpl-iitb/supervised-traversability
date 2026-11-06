@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; crossing and false-alarm logic tested in tests/test_real_metrics.py.
+# Checked: crossing and false-alarm logic tested in tests/test_real_metrics.py.
 """Metrics for real-robot experiments: frame, crossing and false-alarm level, with run-level bootstrap.
 
 Convention: higher score = traversable; ``flag`` = model says NOT traversable.

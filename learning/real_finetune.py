@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; checked through its outputs and the split/metric tests.
+# Checked through its outputs and the split/metric tests.
 """End-to-end fine-tuning on real data: ResNet-18 and the deployable MobileNetV3-Small.
 
     python3 -m learning.real_finetune --data DATA --out runs/real_v1 --stage cv

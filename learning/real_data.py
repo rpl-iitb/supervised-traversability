@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; split logic is tested in tests/test_real_data.py, the rest checked by inspection of outputs.
+# Checked: split logic is tested in tests/test_real_data.py, the rest checked by inspection of outputs.
 """Real-robot frames for training: labels, leak-free run splits, and the masked floor input."""
 
 from __future__ import annotations

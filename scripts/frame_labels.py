@@ -33,8 +33,7 @@ from scripts.episode_io import footprint_bbox, load_episode, world_to_base
 
 
 # Placeholder operator knowledge: 1 = operator would drive over, 0 = avoid,
-# None = no prior. These are *assumptions to be confirmed* with the supervisor
-# and ATI, not a statement of the company's policy.
+# None = no prior. These are assumptions, not an operator's actual policy.
 DEFAULT_OPERATOR_PRIOR = {
     "clean_floor": 1,
     "plastic_wrapper": 1,
@@ -214,7 +213,7 @@ def _finish(record: dict, outcome: int | None, reason: str, config: LabelConfig)
 
 
 def hazard_encounters(episode: dict, config: LabelConfig) -> list[dict]:
-    """Per-hazard crossing summary: the object-level record the professor asked for."""
+    """Per-hazard crossing summary: the object-level record."""
     index = _StateIndex(episode["state"])
     results = []
     for item in _target_hazards(episode["scenario"]):
@@ -238,8 +237,7 @@ def hazard_encounters(episode: dict, config: LabelConfig) -> list[dict]:
 
 
 MIN_VIBRATION_THRESHOLD = 0.05  # m/s^2 RMS; guards against a noise-free simulator
-# Assumed payload-disturbance limit (~0.03 g RMS). A placeholder to be set with
-# ATI; the soft threshold, by contrast, is calibrated from clean-floor data.
+# Assumed payload-disturbance limit (~0.03 g RMS), a placeholder; the soft threshold, by contrast, is calibrated from clean-floor data.
 DEFAULT_VIBRATION_HARD = 0.3
 
 

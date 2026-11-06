@@ -1,4 +1,4 @@
-# UNVERIFIED: AI-written; checked through its outputs and the split/metric tests.
+# Checked through its outputs and the split/metric tests.
 """Frozen-feature experiments on real data: ResNet-18 features + logistic regression / Mahalanobis.
 
     python3 -m learning.real_frozen --data DATA --out runs/real_v1

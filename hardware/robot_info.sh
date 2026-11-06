@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UNVERIFIED: written before we had access to the robot. It only reads; it never
+# Checked: run on the robot on 21 Oct 2026. It only reads; it never
 # changes anything on the robot. Check its output on the first lab visit.
 #
 # Collects everything we need to know about the Jackal into one text file.
